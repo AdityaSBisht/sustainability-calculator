@@ -239,78 +239,6 @@ export default function Home() {
             {loading ? 'Calculating...' : 'Calculate Impact →'}
           </button>
 
-          {/* Growth Rate — only shows after first calculation */}
-          {results && (
-            <div style={{
-              borderTop: '1px solid #1e1e1e',
-              paddingTop: 24,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-              animation: 'fadeIn 0.5s ease forwards'
-            }}>
-              {/* Section header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                <span style={{ fontSize: 16 }}>📈</span>
-                <div>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif', margin: 0 }}>
-                    Model growth scenarios
-                  </p>
-                  <p style={{ fontSize: 11, color: '#555', fontFamily: 'Space Mono, monospace', margin: '3px 0 0' }}>
-                    Adjust to see how tonnage growth compounds over 5 or 10 years
-                  </p>
-                </div>
-              </div>
-
-              {/* Slider row */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.8 }}>
-                  Annual Tonnage Growth
-                </label>
-                <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 16, color: '#4d9fff', fontWeight: 700 }}>
-                  {growthRate}%
-                </span>
-              </div>
-              <input
-                type='range' min={0} max={100} step={1}
-                value={growthRate}
-                onChange={e => setGrowthRate(Number(e.target.value))}
-                style={{ accentColor: '#4d9fff', cursor: 'pointer', width: '100%' }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 11, color: '#333' }}>0% flat</span>
-                <span style={{ fontSize: 11, color: '#333' }}>100%</span>
-              </div>
-
-              {/* Context hint */}
-              <div style={{ background: 'rgba(77,159,255,0.06)', border: '1px solid rgba(77,159,255,0.12)', borderRadius: 8, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <p style={{ fontSize: 11, color: '#4d9fff', fontFamily: 'Space Mono, monospace', margin: 0, opacity: 0.85 }}>
-                  {growthLabel(growthRate)}
-                </p>
-                {years > 1 && (
-                  <p style={{ fontSize: 11, color: '#444', fontFamily: 'Space Mono, monospace', margin: 0 }}>
-                    Year 1: {Number(tonnage).toLocaleString()} → Year {years}: {Math.round(tonnage * Math.pow(1 + growthRate / 100, years - 1)).toLocaleString()} tons
-                    {growthRate > 0 && ` · ×${compoundMultiplier(years, growthRate).toFixed(2)} vs ×${years} flat`}
-                  </p>
-                )}
-                {years === 1 && (
-                  <p style={{ fontSize: 11, color: '#444', fontFamily: 'Space Mono, monospace', margin: 0 }}>
-                    Switch to 5Y or 10Y in the results to see compound impact
-                  </p>
-                )}
-              </div>
-
-              {/* Year Toggle — lives here too for convenience */}
-              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                {[1, 5, 10].map(y => (
-                  <button key={y} onClick={() => setYears(y)} style={{ flex: 1, background: years === y ? '#4d9fff' : '#1a1a1a', color: years === y ? '#000000' : '#666', border: years === y ? 'none' : '1px solid #2a2a2a', borderRadius: 8, padding: '10px 0', fontSize: 12, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: 'pointer', transition: 'all 0.2s ease' }}>
-                    {y === 1 ? '1 Year' : `${y} Years`}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
         </div>
       </section>
 
@@ -318,13 +246,96 @@ export default function Home() {
       {results && (
         <section ref={resultsRef} style={{ maxWidth: 900, margin: '0 auto', padding: '0 24px 80px' }}>
 
-          {/* Divider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 40 }}>
+          {/* Divider label */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
             <div style={{ height: 1, flex: 1, background: '#222' }} />
             <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.6 }}>
               {years === 1 ? 'Annual Impact' : `${years}-Year Cumulative Impact${growthRate > 0 ? ` @ ${growthRate}% growth` : ' (flat)'}`} — {selectedCountry}
             </span>
             <div style={{ height: 1, flex: 1, background: '#222' }} />
+          </div>
+
+          {/* ── Projection Control Panel ── */}
+          <div style={{
+            background: '#0d1a14',
+            border: '1px solid #1a2e20',
+            borderRadius: 16,
+            padding: '24px 28px',
+            marginBottom: 36,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 20,
+            animation: 'fadeIn 0.5s ease forwards',
+            opacity: 0
+          }}>
+
+            {/* Header row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 16 }}>📈</span>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif', margin: 0 }}>
+                  Model growth scenarios
+                </p>
+              </div>
+              <p style={{ fontSize: 11, color: '#444', fontFamily: 'Space Mono, monospace', margin: 0 }}>
+                Adjust projection window and tonnage growth rate
+              </p>
+            </div>
+
+            {/* Year toggle + growth slider side by side on wide screens */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 24, alignItems: 'start' }}>
+
+              {/* Year Toggle */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>
+                  Projection
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[1, 5, 10].map(y => (
+                    <button key={y} onClick={() => setYears(y)} style={{ background: years === y ? '#4d9fff' : '#111111', color: years === y ? '#000000' : '#666', border: years === y ? 'none' : '1px solid #222', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: 'pointer', transition: 'all 0.2s ease', whiteSpace: 'nowrap' }}>
+                      {y === 1 ? '1 Year' : `${y} Years`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Growth slider */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>
+                    Annual Tonnage Growth
+                  </label>
+                  <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, color: '#4d9fff', fontWeight: 700 }}>
+                    {growthRate}%
+                  </span>
+                </div>
+                <input
+                  type='range' min={0} max={100} step={1}
+                  value={growthRate}
+                  onChange={e => setGrowthRate(Number(e.target.value))}
+                  style={{ accentColor: '#4d9fff', cursor: 'pointer', width: '100%' }}
+                  disabled={years === 1}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 10, color: '#333' }}>0% flat</span>
+                  <span style={{ fontSize: 10, color: '#333' }}>100%</span>
+                </div>
+
+                {/* Context hint */}
+                <div style={{ background: 'rgba(77,159,255,0.05)', border: '1px solid rgba(77,159,255,0.1)', borderRadius: 8, padding: '10px 14px' }}>
+                  <p style={{ fontSize: 11, color: '#4d9fff', fontFamily: 'Space Mono, monospace', margin: '0 0 4px', opacity: years === 1 ? 0.4 : 0.85 }}>
+                    {years === 1 ? 'Select 5Y or 10Y to model growth' : growthLabel(growthRate)}
+                  </p>
+                  {years > 1 && (
+                    <p style={{ fontSize: 10, color: '#444', fontFamily: 'Space Mono, monospace', margin: 0 }}>
+                      Year 1: {Number(tonnage).toLocaleString()} → Year {years}: {Math.round(tonnage * Math.pow(1 + growthRate / 100, years - 1)).toLocaleString()} tons
+                      {growthRate > 0 && ` · ×${compoundMultiplier(years, growthRate).toFixed(2)} cumulative`}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+            </div>
           </div>
 
           {/* Environmental Cards */}
@@ -408,7 +419,7 @@ export default function Home() {
       {/* Footer */}
       <footer style={{ textAlign: 'center', padding: '32px 24px', borderTop: '1px solid #161616' }}>
         <p style={{ fontSize: 12, color: '#333', fontFamily: 'Space Mono, monospace', letterSpacing: '0.05em' }}>
-          Developed by Aditya and Atharva
+          Built by Aditya and Atharva
         </p>
       </footer>
 
