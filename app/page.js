@@ -7,7 +7,6 @@ import {
   PieChart, Pie, Legend
 } from 'recharts'
 
-// --- Unit helpers ---
 const GALLON_TO_LITRE = 3.785
 const METRIC_COUNTRIES = [
   'India', 'United Kingdom', 'Germany', 'Singapore', 'Australia',
@@ -19,14 +18,11 @@ function fuelUnit(metric) { return metric ? 'litres' : 'gal' }
 function co2Value(kgs, metric) { return metric ? kgs : Math.round(kgs * 2.205) }
 function co2Unit(metric) { return metric ? 'kgs' : 'lbs' }
 
-// --- Compound growth multiplier ---
 function compoundMultiplier(years, growthPct) {
   if (years === 1) return 1
   const r = growthPct / 100
   let total = 0
-  for (let y = 0; y < years; y++) {
-    total += Math.pow(1 + r, y)
-  }
+  for (let y = 0; y < years; y++) total += Math.pow(1 + r, y)
   return total
 }
 
@@ -39,7 +35,6 @@ function growthLabel(rate) {
   return 'Hyper growth — rapidly expanding'
 }
 
-// --- Animated number hook ---
 function useCountUp(target, duration = 1500) {
   const [value, setValue] = useState(0)
   useEffect(() => {
@@ -71,8 +66,7 @@ function StatCard({ label, value, unit, icon, isCurrency = false, delay = 0 }) {
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #00e87a, transparent)' }} />
       <span style={{ fontSize: 28 }}>{icon}</span>
       <span style={{
-        fontFamily: 'Space Mono, monospace',
-        fontSize: 'clamp(16px, 2.5vw, 28px)',
+        fontFamily: 'Space Mono, monospace', fontSize: 'clamp(16px, 2.5vw, 28px)',
         fontWeight: 700, color: '#00e87a', letterSpacing: '-0.5px',
         wordBreak: 'break-all', display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'wrap'
       }}>
@@ -80,9 +74,7 @@ function StatCard({ label, value, unit, icon, isCurrency = false, delay = 0 }) {
         {animated.toLocaleString()}
         {!isCurrency && <span style={{ fontSize: 12, color: '#00e87a', opacity: 0.6, marginLeft: 2 }}>{unit}</span>}
       </span>
-      <span style={{ fontSize: 11, color: '#00e87a', opacity: 0.55, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-        {label}
-      </span>
+      <span style={{ fontSize: 11, color: '#00e87a', opacity: 0.55, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
     </div>
   )
 }
@@ -133,6 +125,7 @@ export default function Home() {
   const resultsRef = useRef(null)
   const metric = useMetric(selectedCountry)
   const multiplier = compoundMultiplier(years, growthRate)
+  const tonnageValid = tonnage > 0
 
   useEffect(() => {
     async function fetchCountries() {
@@ -153,11 +146,7 @@ export default function Home() {
 
   function handleTonnageInput(e) {
     const raw = e.target.value.replace(/,/g, '')
-    if (raw === '') {
-      setTonnageDisplay('')
-      setTonnage(0)
-      return
-    }
+    if (raw === '') { setTonnageDisplay(''); setTonnage(0); return }
     if (isNaN(raw)) return
     const num = Number(raw)
     setTonnage(num)
@@ -171,7 +160,7 @@ export default function Home() {
   }
 
   function handleCalculate() {
-    if (!countryData || !tonnage) return
+    if (!countryData || !tonnageValid) return
     setLoading(true)
     setResults(null)
     setYears(1)
@@ -180,9 +169,7 @@ export default function Home() {
       const output = calculate(Number(tonnage), countryData)
       setResults(output)
       setLoading(false)
-      setTimeout(() => {
-        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, 100)
+      setTimeout(() => { resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 100)
     }, 400)
   }
 
@@ -195,7 +182,6 @@ export default function Home() {
   ] : []
 
   const currency = countryData?.currency_symbol || '$'
-  const tonnageValid = tonnage > 0
 
   return (
     <main style={{ minHeight: '100vh', background: '#080808' }}>
@@ -219,9 +205,7 @@ export default function Home() {
 
           {/* Country */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>
-              Country
-            </label>
+            <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>Country</label>
             <select
               value={selectedCountry}
               onChange={e => setSelectedCountry(e.target.value)}
@@ -234,28 +218,26 @@ export default function Home() {
 
           {/* Tonnage — locked until country selected */}
           <div style={{
-            display: 'flex', flexDirection: 'column', gap: 8,
+            display: 'flex', flexDirection: 'column', gap: 12,
             opacity: selectedCountry ? 1 : 0.4,
             transition: 'opacity 0.3s ease',
             pointerEvents: selectedCountry ? 'auto' : 'none'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>
-                Annual Tonnage
-                {!selectedCountry && (
-                  <span style={{ color: '#555', marginLeft: 8, textTransform: 'none', fontSize: 11, letterSpacing: 0, fontFamily: 'Space Mono, monospace' }}>
-                    — select a country first
-                  </span>
-                )}
-              </label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7, display: 'block' }}>
+                  Annual Tonnage
+                </label>
+                <p style={{ fontSize: 11, color: '#444', fontFamily: 'Space Mono, monospace', margin: '4px 0 0' }}>
+                  Drag to select tonnage or type below
+                </p>
+              </div>
               {tonnageValid && (
-                <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 13, color: '#f5a623', fontWeight: 700 }}>
+                <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 13, color: '#f5a623', fontWeight: 700, whiteSpace: 'nowrap' }}>
                   {Number(tonnage).toLocaleString()} tons
                 </span>
               )}
             </div>
-
-            {/* Slider */}
             <input
               type='range' min={0} max={5000000} step={50000}
               value={tonnage}
@@ -263,35 +245,16 @@ export default function Home() {
               disabled={!selectedCountry}
               style={{ accentColor: '#f5a623', cursor: selectedCountry ? 'pointer' : 'not-allowed', width: '100%' }}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: '#555' }}>Min</span>
-              <span style={{ fontSize: 11, color: '#555' }}>5M tons</span>
-            </div>
-
-            {/* Text input */}
             <input
               type='text'
               value={tonnageDisplay}
               onChange={handleTonnageInput}
               disabled={!selectedCountry}
               placeholder='Type your annual tonnage here...'
-              style={{
-                background: '#1a1a1a',
-                border: `1px solid ${tonnageValid ? '#f5a623' : '#333'}`,
-                borderRadius: 10,
-                color: '#ffffff',
-                fontFamily: 'Space Mono, monospace',
-                fontSize: 15,
-                padding: '12px 16px',
-                outline: 'none',
-                marginTop: 4,
-                cursor: selectedCountry ? 'text' : 'not-allowed',
-                transition: 'border-color 0.2s ease'
-              }}
+              style={{ background: '#1a1a1a', border: `1px solid ${tonnageValid ? '#f5a623' : '#333'}`, borderRadius: 10, color: '#ffffff', fontFamily: 'Space Mono, monospace', fontSize: 15, padding: '12px 16px', outline: 'none', cursor: selectedCountry ? 'text' : 'not-allowed', transition: 'border-color 0.2s ease' }}
             />
-            {/* Validation hint */}
             {selectedCountry && !tonnageValid && (
-              <p style={{ fontSize: 11, color: '#555', fontFamily: 'Space Mono, monospace', margin: '2px 0 0' }}>
+              <p style={{ fontSize: 11, color: '#555', fontFamily: 'Space Mono, monospace', margin: 0 }}>
                 Enter a value greater than 0 to calculate impact
               </p>
             )}
@@ -331,9 +294,7 @@ export default function Home() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 16 }}>📈</span>
-                <p style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif', margin: 0 }}>
-                  Model growth scenarios
-                </p>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif', margin: 0 }}>Model growth scenarios</p>
               </div>
               <p style={{ fontSize: 11, color: '#444', fontFamily: 'Space Mono, monospace', margin: 0 }}>
                 Adjust projection window and tonnage growth rate
