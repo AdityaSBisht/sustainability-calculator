@@ -124,8 +124,8 @@ export default function Home() {
   const [countries, setCountries] = useState([])
   const [selectedCountry, setSelectedCountry] = useState('')
   const [countryData, setCountryData] = useState(null)
-  const [tonnage, setTonnage] = useState(1250000)
-  const [tonnageDisplay, setTonnageDisplay] = useState('1,250,000')
+  const [tonnage, setTonnage] = useState(0)
+  const [tonnageDisplay, setTonnageDisplay] = useState('')
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [years, setYears] = useState(1)
@@ -151,11 +151,11 @@ export default function Home() {
     fetchCountryData()
   }, [selectedCountry])
 
-  // FIX: allow free typing including clearing the field
   function handleTonnageInput(e) {
     const raw = e.target.value.replace(/,/g, '')
     if (raw === '') {
       setTonnageDisplay('')
+      setTonnage(0)
       return
     }
     if (isNaN(raw)) return
@@ -167,7 +167,7 @@ export default function Home() {
   function handleSlider(e) {
     const num = Number(e.target.value)
     setTonnage(num)
-    setTonnageDisplay(num.toLocaleString())
+    setTonnageDisplay(num > 0 ? num.toLocaleString() : '')
   }
 
   function handleCalculate() {
@@ -195,6 +195,7 @@ export default function Home() {
   ] : []
 
   const currency = countryData?.currency_symbol || '$'
+  const tonnageValid = tonnage > 0
 
   return (
     <main style={{ minHeight: '100vh', background: '#080808' }}>
@@ -218,14 +219,20 @@ export default function Home() {
 
           {/* Country */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>Country</label>
-            <select value={selectedCountry} onChange={e => setSelectedCountry(e.target.value)} style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 10, color: selectedCountry ? '#ffffff' : '#666', fontFamily: 'Syne, sans-serif', fontSize: 15, padding: '14px 16px', outline: 'none', cursor: 'pointer', appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300e87a' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 16px center', backgroundSize: '12px' }}>
+            <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>
+              Country
+            </label>
+            <select
+              value={selectedCountry}
+              onChange={e => setSelectedCountry(e.target.value)}
+              style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 10, color: selectedCountry ? '#ffffff' : '#666', fontFamily: 'Syne, sans-serif', fontSize: 15, padding: '14px 16px', outline: 'none', cursor: 'pointer', appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300e87a' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 16px center', backgroundSize: '12px' }}
+            >
               <option value='' style={{ background: '#1a1a1a', color: '#666' }}>Select a country...</option>
               {countries.map(c => <option key={c.country} value={c.country} style={{ background: '#1a1a1a', color: '#fff' }}>{c.country}</option>)}
             </select>
           </div>
 
-          {/* Tonnage — disabled and grayed out until country is selected */}
+          {/* Tonnage — locked until country selected */}
           <div style={{
             display: 'flex', flexDirection: 'column', gap: 8,
             opacity: selectedCountry ? 1 : 0.4,
@@ -236,15 +243,19 @@ export default function Home() {
               <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>
                 Annual Tonnage
                 {!selectedCountry && (
-                  <span style={{ color: '#555', marginLeft: 8, textTransform: 'none', fontSize: 11, letterSpacing: 0 }}>
+                  <span style={{ color: '#555', marginLeft: 8, textTransform: 'none', fontSize: 11, letterSpacing: 0, fontFamily: 'Space Mono, monospace' }}>
                     — select a country first
                   </span>
                 )}
               </label>
-              <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 14, color: '#f5a623', fontWeight: 700 }}>
-                {tonnageDisplay || '—'} {tonnageDisplay ? 'tons' : ''}
-              </span>
+              {tonnageValid && (
+                <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 13, color: '#f5a623', fontWeight: 700 }}>
+                  {Number(tonnage).toLocaleString()} tons
+                </span>
+              )}
             </div>
+
+            {/* Slider */}
             <input
               type='range' min={0} max={5000000} step={50000}
               value={tonnage}
@@ -253,24 +264,44 @@ export default function Home() {
               style={{ accentColor: '#f5a623', cursor: selectedCountry ? 'pointer' : 'not-allowed', width: '100%' }}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: '#555' }}>0</span>
-              <span style={{ fontSize: 11, color: '#555' }}>5M</span>
+              <span style={{ fontSize: 11, color: '#555' }}>Min</span>
+              <span style={{ fontSize: 11, color: '#555' }}>5M tons</span>
             </div>
+
+            {/* Text input */}
             <input
               type='text'
               value={tonnageDisplay}
               onChange={handleTonnageInput}
               disabled={!selectedCountry}
-              placeholder='e.g. 1,250,000'
-              style={{ background: '#1a1a1a', border: '1px solid #f5a623', borderRadius: 10, color: '#ffffff', fontFamily: 'Space Mono, monospace', fontSize: 15, padding: '12px 16px', outline: 'none', marginTop: 4, cursor: selectedCountry ? 'text' : 'not-allowed' }}
+              placeholder='Type your annual tonnage here...'
+              style={{
+                background: '#1a1a1a',
+                border: `1px solid ${tonnageValid ? '#f5a623' : '#333'}`,
+                borderRadius: 10,
+                color: '#ffffff',
+                fontFamily: 'Space Mono, monospace',
+                fontSize: 15,
+                padding: '12px 16px',
+                outline: 'none',
+                marginTop: 4,
+                cursor: selectedCountry ? 'text' : 'not-allowed',
+                transition: 'border-color 0.2s ease'
+              }}
             />
+            {/* Validation hint */}
+            {selectedCountry && !tonnageValid && (
+              <p style={{ fontSize: 11, color: '#555', fontFamily: 'Space Mono, monospace', margin: '2px 0 0' }}>
+                Enter a value greater than 0 to calculate impact
+              </p>
+            )}
           </div>
 
           {/* Calculate Button */}
           <button
             onClick={handleCalculate}
-            disabled={!selectedCountry || !tonnage || loading}
-            style={{ background: selectedCountry && tonnage ? '#00e87a' : '#1a1a1a', color: selectedCountry && tonnage ? '#000000' : '#555', border: 'none', borderRadius: 10, padding: '16px', fontSize: 15, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: selectedCountry && tonnage ? 'pointer' : 'not-allowed', transition: 'all 0.2s ease', letterSpacing: '0.02em' }}>
+            disabled={!selectedCountry || !tonnageValid || loading}
+            style={{ background: selectedCountry && tonnageValid ? '#00e87a' : '#1a1a1a', color: selectedCountry && tonnageValid ? '#000000' : '#555', border: 'none', borderRadius: 10, padding: '16px', fontSize: 15, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: selectedCountry && tonnageValid ? 'pointer' : 'not-allowed', transition: 'all 0.2s ease', letterSpacing: '0.02em' }}>
             {loading ? 'Calculating...' : 'Calculate Impact →'}
           </button>
 
