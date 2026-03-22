@@ -151,12 +151,17 @@ export default function Home() {
     fetchCountryData()
   }, [selectedCountry])
 
+  // FIX: allow free typing including clearing the field
   function handleTonnageInput(e) {
     const raw = e.target.value.replace(/,/g, '')
-    if (raw === '' || isNaN(raw)) return
+    if (raw === '') {
+      setTonnageDisplay('')
+      return
+    }
+    if (isNaN(raw)) return
     const num = Number(raw)
     setTonnage(num)
-    setTonnageDisplay(num.toLocaleString())
+    setTonnageDisplay(e.target.value.replace(/[^0-9,]/g, ''))
   }
 
   function handleSlider(e) {
@@ -220,22 +225,52 @@ export default function Home() {
             </select>
           </div>
 
-          {/* Tonnage */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* Tonnage — disabled and grayed out until country is selected */}
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 8,
+            opacity: selectedCountry ? 1 : 0.4,
+            transition: 'opacity 0.3s ease',
+            pointerEvents: selectedCountry ? 'auto' : 'none'
+          }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>Annual Tonnage</label>
-              <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 14, color: '#f5a623', fontWeight: 700 }}>{Number(tonnage).toLocaleString()} tons</span>
+              <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>
+                Annual Tonnage
+                {!selectedCountry && (
+                  <span style={{ color: '#555', marginLeft: 8, textTransform: 'none', fontSize: 11, letterSpacing: 0 }}>
+                    — select a country first
+                  </span>
+                )}
+              </label>
+              <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 14, color: '#f5a623', fontWeight: 700 }}>
+                {tonnageDisplay || '—'} {tonnageDisplay ? 'tons' : ''}
+              </span>
             </div>
-            <input type='range' min={100000} max={5000000} step={50000} value={tonnage} onChange={handleSlider} style={{ accentColor: '#f5a623', cursor: 'pointer', width: '100%' }} />
+            <input
+              type='range' min={0} max={5000000} step={50000}
+              value={tonnage}
+              onChange={handleSlider}
+              disabled={!selectedCountry}
+              style={{ accentColor: '#f5a623', cursor: selectedCountry ? 'pointer' : 'not-allowed', width: '100%' }}
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: '#555' }}>100K</span>
+              <span style={{ fontSize: 11, color: '#555' }}>0</span>
               <span style={{ fontSize: 11, color: '#555' }}>5M</span>
             </div>
-            <input type='text' value={tonnageDisplay} onChange={handleTonnageInput} style={{ background: '#1a1a1a', border: '1px solid #f5a623', borderRadius: 10, color: '#ffffff', fontFamily: 'Space Mono, monospace', fontSize: 15, padding: '12px 16px', outline: 'none', marginTop: 4 }} />
+            <input
+              type='text'
+              value={tonnageDisplay}
+              onChange={handleTonnageInput}
+              disabled={!selectedCountry}
+              placeholder='e.g. 1,250,000'
+              style={{ background: '#1a1a1a', border: '1px solid #f5a623', borderRadius: 10, color: '#ffffff', fontFamily: 'Space Mono, monospace', fontSize: 15, padding: '12px 16px', outline: 'none', marginTop: 4, cursor: selectedCountry ? 'text' : 'not-allowed' }}
+            />
           </div>
 
           {/* Calculate Button */}
-          <button onClick={handleCalculate} disabled={!selectedCountry || !tonnage || loading} style={{ background: selectedCountry && tonnage ? '#00e87a' : '#1a1a1a', color: selectedCountry && tonnage ? '#000000' : '#555', border: 'none', borderRadius: 10, padding: '16px', fontSize: 15, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: selectedCountry && tonnage ? 'pointer' : 'not-allowed', transition: 'all 0.2s ease', letterSpacing: '0.02em' }}>
+          <button
+            onClick={handleCalculate}
+            disabled={!selectedCountry || !tonnage || loading}
+            style={{ background: selectedCountry && tonnage ? '#00e87a' : '#1a1a1a', color: selectedCountry && tonnage ? '#000000' : '#555', border: 'none', borderRadius: 10, padding: '16px', fontSize: 15, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: selectedCountry && tonnage ? 'pointer' : 'not-allowed', transition: 'all 0.2s ease', letterSpacing: '0.02em' }}>
             {loading ? 'Calculating...' : 'Calculate Impact →'}
           </button>
 
@@ -246,7 +281,7 @@ export default function Home() {
       {results && (
         <section ref={resultsRef} style={{ maxWidth: 900, margin: '0 auto', padding: '0 24px 80px' }}>
 
-          {/* Divider label */}
+          {/* Divider */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
             <div style={{ height: 1, flex: 1, background: '#222' }} />
             <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.6 }}>
@@ -255,21 +290,13 @@ export default function Home() {
             <div style={{ height: 1, flex: 1, background: '#222' }} />
           </div>
 
-          {/* ── Projection Control Panel ── */}
+          {/* Projection Control Panel */}
           <div style={{
-            background: '#0d1a14',
-            border: '1px solid #1a2e20',
-            borderRadius: 16,
-            padding: '24px 28px',
-            marginBottom: 36,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 20,
-            animation: 'fadeIn 0.5s ease forwards',
-            opacity: 0
+            background: '#0d1a14', border: '1px solid #1a2e20', borderRadius: 16,
+            padding: '24px 28px', marginBottom: 36,
+            display: 'flex', flexDirection: 'column', gap: 20,
+            animation: 'fadeIn 0.5s ease forwards', opacity: 0
           }}>
-
-            {/* Header row */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 16 }}>📈</span>
@@ -282,14 +309,11 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Year toggle + growth slider side by side on wide screens */}
             <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 24, alignItems: 'start' }}>
 
               {/* Year Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>
-                  Projection
-                </label>
+                <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>Projection</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {[1, 5, 10].map(y => (
                     <button key={y} onClick={() => setYears(y)} style={{ background: years === y ? '#4d9fff' : '#111111', color: years === y ? '#000000' : '#666', border: years === y ? 'none' : '1px solid #222', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: 'pointer', transition: 'all 0.2s ease', whiteSpace: 'nowrap' }}>
@@ -299,29 +323,23 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Growth slider */}
+              {/* Growth Slider */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>
-                    Annual Tonnage Growth
-                  </label>
-                  <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, color: '#4d9fff', fontWeight: 700 }}>
-                    {growthRate}%
-                  </span>
+                  <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>Annual Tonnage Growth</label>
+                  <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, color: '#4d9fff', fontWeight: 700 }}>{growthRate}%</span>
                 </div>
                 <input
                   type='range' min={0} max={100} step={1}
                   value={growthRate}
                   onChange={e => setGrowthRate(Number(e.target.value))}
-                  style={{ accentColor: '#4d9fff', cursor: 'pointer', width: '100%' }}
                   disabled={years === 1}
+                  style={{ accentColor: '#4d9fff', cursor: years === 1 ? 'not-allowed' : 'pointer', width: '100%', opacity: years === 1 ? 0.4 : 1, transition: 'opacity 0.3s ease' }}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 10, color: '#333' }}>0% flat</span>
                   <span style={{ fontSize: 10, color: '#333' }}>100%</span>
                 </div>
-
-                {/* Context hint */}
                 <div style={{ background: 'rgba(77,159,255,0.05)', border: '1px solid rgba(77,159,255,0.1)', borderRadius: 8, padding: '10px 14px' }}>
                   <p style={{ fontSize: 11, color: '#4d9fff', fontFamily: 'Space Mono, monospace', margin: '0 0 4px', opacity: years === 1 ? 0.4 : 0.85 }}>
                     {years === 1 ? 'Select 5Y or 10Y to model growth' : growthLabel(growthRate)}
@@ -334,7 +352,6 @@ export default function Home() {
                   )}
                 </div>
               </div>
-
             </div>
           </div>
 
