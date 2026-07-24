@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Airport Cargo Savings Calculator
 
-## Getting Started
+A Kale Logistics Solutions calculator for estimating airport cargo operating savings and CO2 impact across trucker, freight-forwarder, airport, and ground-handler scenarios.
 
-First, run the development server:
+## Getting started
+
+Install dependencies and run the development server:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in a browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Country data
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Country-specific diesel prices, wages, and currency symbols are stored in [`public/country_data.csv`](public/country_data.csv). The browser loads that file directly; Supabase credentials are not required.
 
-## Learn More
+Keep these columns when replacing the CSV with a new export:
 
-To learn more about Next.js, take a look at the following resources:
+- `id`
+- `country`
+- `diesel_price_per_gallon`
+- `trucker_wage_per_hr`
+- `handler_wage_per_hr`
+- `carrier_wage_per_hr`
+- `forwarder_wage_per_hr`
+- `currency_symbol`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Validation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npm run build
+```

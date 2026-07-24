@@ -1,21 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { FALLBACK_COUNTRIES, loadCountryData } from '../lib/country-data'
 import { calculateSimple, calculateForwarder, calculateAirport, calculateGHA } from '../utils/calculator'
-
-const FALLBACK_COUNTRIES = [
-  { country: 'United States', diesel_price_per_gallon: 4.00, trucker_wage_per_hr: 37.00, currency_symbol: '$' },
-  { country: 'United Kingdom', diesel_price_per_gallon: 7.20, trucker_wage_per_hr: 18.00, currency_symbol: '£' },
-  { country: 'India', diesel_price_per_gallon: 1.20, trucker_wage_per_hr: 3.50, currency_symbol: '₹' },
-  { country: 'UAE', diesel_price_per_gallon: 2.50, trucker_wage_per_hr: 8.00, currency_symbol: 'AED' },
-  { country: 'Germany', diesel_price_per_gallon: 7.50, trucker_wage_per_hr: 22.00, currency_symbol: '€' },
-  { country: 'Singapore', diesel_price_per_gallon: 5.80, trucker_wage_per_hr: 15.00, currency_symbol: 'SGD' },
-  { country: 'Australia', diesel_price_per_gallon: 4.50, trucker_wage_per_hr: 28.00, currency_symbol: 'AUD' },
-  { country: 'Canada', diesel_price_per_gallon: 4.20, trucker_wage_per_hr: 25.00, currency_symbol: 'CAD' },
-  { country: 'China', diesel_price_per_gallon: 1.50, trucker_wage_per_hr: 6.00, currency_symbol: '¥' },
-  { country: 'Brazil', diesel_price_per_gallon: 3.20, trucker_wage_per_hr: 5.00, currency_symbol: 'R$' }
-]
 
 const ENTITY_OPTIONS = [
   {
@@ -468,11 +455,16 @@ export default function Home() {
   const hasResults = Boolean(results)
 
   useEffect(() => {
-    supabase.from('country_data').select('country').order('country')
-      .then(({ data, error }) => {
-        if (error || !data?.length) return
-        setCountries(data)
+    let active = true
+    loadCountryData()
+      .then((data) => {
+        if (active && data.length) setCountries(data)
       })
+      .catch(() => {})
+
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
@@ -484,36 +476,31 @@ export default function Home() {
   useEffect(() => {
     if (!selectedCountry) return
 
-    const fallback = FALLBACK_COUNTRIES.find((country) => country.country === selectedCountry)
+    const market = countries.find((country) => country.country === selectedCountry)
+      || FALLBACK_COUNTRIES.find((country) => country.country === selectedCountry)
     const applyMarket = (market) => {
       if (!market) return
-      const wage = market.trucker_wage_per_hr
       setCountryData(market)
       setInputs((previous) => ({
         ...previous,
         trucker: {
           ...previous.trucker,
-          hourlyWage: wage,
+          hourlyWage: market.trucker_wage_per_hr,
           dieselPrice: market.diesel_price_per_gallon
         },
         forwarder: {
           ...previous.forwarder,
-          hourlyWage: wage
+          hourlyWage: market.forwarder_wage_per_hr
         },
         gha: {
           ...previous.gha,
-          hourlyWage: wage
+          hourlyWage: market.handler_wage_per_hr
         }
       }))
     }
 
-    applyMarket(fallback)
-
-    supabase.from('country_data').select('*').eq('country', selectedCountry).single()
-      .then(({ data }) => {
-        if (data) applyMarket(data)
-      })
-  }, [selectedCountry])
+    applyMarket(market)
+  }, [countries, selectedCountry])
 
   useEffect(() => {
     if (!hasResults) return
