@@ -1,437 +1,967 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { calculate } from '../utils/calculator'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
-  PieChart, Pie, Legend
-} from 'recharts'
+import { calculateSimple, calculateForwarder, calculateAirport, calculateGHA } from '../utils/calculator'
 
-const GALLON_TO_LITRE = 3.785
-const METRIC_COUNTRIES = [
-  'India', 'United Kingdom', 'Germany', 'Singapore', 'Australia',
-  'Canada', 'China', 'Brazil', 'UAE'
+const FALLBACK_COUNTRIES = [
+  { country: 'United States', diesel_price_per_gallon: 4.00, trucker_wage_per_hr: 37.00, currency_symbol: '$' },
+  { country: 'United Kingdom', diesel_price_per_gallon: 7.20, trucker_wage_per_hr: 18.00, currency_symbol: '£' },
+  { country: 'India', diesel_price_per_gallon: 1.20, trucker_wage_per_hr: 3.50, currency_symbol: '₹' },
+  { country: 'UAE', diesel_price_per_gallon: 2.50, trucker_wage_per_hr: 8.00, currency_symbol: 'AED' },
+  { country: 'Germany', diesel_price_per_gallon: 7.50, trucker_wage_per_hr: 22.00, currency_symbol: '€' },
+  { country: 'Singapore', diesel_price_per_gallon: 5.80, trucker_wage_per_hr: 15.00, currency_symbol: 'SGD' },
+  { country: 'Australia', diesel_price_per_gallon: 4.50, trucker_wage_per_hr: 28.00, currency_symbol: 'AUD' },
+  { country: 'Canada', diesel_price_per_gallon: 4.20, trucker_wage_per_hr: 25.00, currency_symbol: 'CAD' },
+  { country: 'China', diesel_price_per_gallon: 1.50, trucker_wage_per_hr: 6.00, currency_symbol: '¥' },
+  { country: 'Brazil', diesel_price_per_gallon: 3.20, trucker_wage_per_hr: 5.00, currency_symbol: 'R$' }
 ]
-function useMetric(country) { return METRIC_COUNTRIES.includes(country) }
-function fuelValue(gallons, metric) { return metric ? Math.round(gallons * GALLON_TO_LITRE) : gallons }
-function fuelUnit(metric) { return metric ? 'litres' : 'gal' }
-function co2Value(kgs, metric) { return metric ? kgs : Math.round(kgs * 2.205) }
-function co2Unit(metric) { return metric ? 'kgs' : 'lbs' }
 
-function compoundMultiplier(years, growthPct) {
-  if (years === 1) return 1
-  const r = growthPct / 100
-  let total = 0
-  for (let y = 0; y < years; y++) total += Math.pow(1 + r, y)
-  return total
+const ENTITY_OPTIONS = [
+  {
+    id: 'trucker',
+    label: 'Trucker',
+    kicker: 'Fleet movement',
+    description: 'Trips, miles, fuel, labor, idling, paperwork, and penalty exposure.'
+  },
+  {
+    id: 'forwarder',
+    label: 'Freight forwarder',
+    kicker: 'Document flow',
+    description: 'Shipment paperwork and delay exposure across the forwarding desk.'
+  },
+  {
+    id: 'airport',
+    label: 'Airport',
+    kicker: 'Cargo zone',
+    description: 'Truck volume, turnaround, and congestion pressure around the cargo estate.'
+  },
+  {
+    id: 'gha',
+    label: 'Ground handler',
+    kicker: 'Dock operations',
+    description: 'AWB handling, gate staffing, and truck wait time before docking.'
+  }
+]
+
+const INPUTS = {
+  trucker: [
+    ['trucks', 'Number of trucks in fleet', 'Total active trucks serving airport cargo.'],
+    ['tripsPerMonth', 'Airport trips per truck per month', 'Average monthly airport runs per truck.'],
+    ['roundTripDistanceMiles', 'Round-trip distance to terminal', 'Both directions, measured in miles.'],
+    ['hourlyWage', 'Average driver hourly wage', 'Pre-filled from the selected market.', 'currency'],
+    ['dieselPrice', 'Diesel price per gallon', 'Pre-filled from the selected market.', 'currency', 0.01],
+    ['mpg', 'Truck fuel efficiency', 'Typical diesel truck range is 6 to 8 mpg.', '', 0.1],
+    ['idleMinutesPerTrip', 'Average idle time at gate', 'Minutes per trip waiting or queueing.']
+  ],
+  forwarder: [
+    ['shipmentsPerMonth', 'Shipments per month', 'Total monthly forwarding volume.'],
+    ['paperworkTimeMins', 'Paperwork time per shipment', 'Manual entry, checking, and corrections.'],
+    ['hourlyWage', 'Average admin hourly wage', 'Pre-filled from the selected market.', 'currency'],
+    ['slaPenaltyMonthly', 'Average SLA penalties per month', 'Penalty exposure from missed flights or delays.', 'currency']
+  ],
+  airport: [
+    ['dailyTrucks', 'Daily truck volume', 'Trucks entering the cargo zone each day.'],
+    ['turnaroundTimeMins', 'Average truck turnaround time', 'Minutes from entry to exit.'],
+    ['congestionCostMonthly', 'Monthly congestion costs', 'Traffic management and infrastructure pressure.', 'currency']
+  ],
+  gha: [
+    ['monthlyAWBs', 'Monthly AWBs handled', 'Total airway bills handled per month.'],
+    ['gateStaff', 'Number of gate staff', 'Staff dedicated to truck check-in.'],
+    ['hourlyWage', 'Gate staff hourly wage', 'Pre-filled from the selected market.', 'currency'],
+    ['waitMinsPerTruck', 'Average truck wait time', 'Minutes before docking.']
+  ]
 }
 
-function growthLabel(rate) {
-  if (rate === 0) return 'Flat — no growth applied'
-  if (rate <= 5) return 'Mature market — conservative'
-  if (rate <= 15) return 'Steady — typical developing markets'
-  if (rate <= 30) return 'High growth — SE Asia & Middle East'
-  if (rate <= 60) return 'Aggressive — emerging hub airports'
-  return 'Hyper growth — rapidly expanding'
+const INITIAL_INPUTS = {
+  trucker: {
+    trucks: 12,
+    tripsPerMonth: 45,
+    roundTripDistanceMiles: 30,
+    mpg: 6.5,
+    idleMinutesPerTrip: 55
+  },
+  forwarder: {},
+  airport: {},
+  gha: {}
 }
 
-function useCountUp(target, duration = 1500) {
-  const [value, setValue] = useState(0)
-  useEffect(() => {
-    if (!target) return
-    setValue(0)
-    let start = 0
-    const steps = 60
-    const increment = target / steps
-    const interval = duration / steps
-    const timer = setInterval(() => {
-      start += increment
-      if (start >= target) { setValue(target); clearInterval(timer) }
-      else setValue(Math.floor(start))
-    }, interval)
-    return () => clearInterval(timer)
-  }, [target])
-  return value
+const BENCHMARK_ASSUMPTIONS = {
+  trucker: {
+    fuelReduction: 18,
+    timeReduction: 65,
+    complianceReduction: 75,
+    maintenanceReduction: 18
+  },
+  forwarder: {
+    fuelReduction: 0,
+    timeReduction: 65,
+    complianceReduction: 80,
+    maintenanceReduction: 0
+  },
+  airport: {
+    fuelReduction: 0,
+    timeReduction: 40,
+    complianceReduction: 70,
+    maintenanceReduction: 0
+  },
+  gha: {
+    fuelReduction: 50,
+    timeReduction: 30,
+    complianceReduction: 0,
+    maintenanceReduction: 0
+  }
 }
 
-function StatCard({ label, value, unit, icon, isCurrency = false, delay = 0 }) {
-  const animated = useCountUp(value)
+const ASSUMPTION_CONTROLS = {
+  trucker: [
+    ['fuelReduction', 'Fuel reduction', 'Fuel spend avoided through lower idle and route waste.'],
+    ['timeReduction', 'Time and labor reduction', 'Driver wait time and paperwork labor avoided.'],
+    ['complianceReduction', 'Penalty exposure reduction', 'Regulatory and exception exposure avoided.'],
+    ['maintenanceReduction', 'Mileage / maintenance reduction', 'Avoided miles multiplied by maintenance cost.']
+  ],
+  forwarder: [
+    ['timeReduction', 'Paperwork reduction', 'Manual document handling avoided.'],
+    ['complianceReduction', 'SLA exposure reduction', 'Delay and missed-service exposure avoided.']
+  ],
+  airport: [
+    ['timeReduction', 'Turnaround reduction', 'Cargo-zone truck cycle time avoided.'],
+    ['complianceReduction', 'Congestion reduction', 'Traffic management and estate pressure avoided.']
+  ],
+  gha: [
+    ['fuelReduction', 'Wait-time reduction', 'Truck waiting time before docking avoided.'],
+    ['timeReduction', 'Gate labor efficiency', 'Staffing effort saved at the gate.']
+  ]
+}
+
+const SAVINGS_ROWS = [
+  { key: 'fuelSavings', label: 'Fuel savings', assumption: 'fuelReduction', chip: 'decrease' },
+  { key: 'driverTimeSavings', label: 'Time and labor savings', assumption: 'timeReduction', chip: 'reduction' },
+  { key: 'complianceSavings', label: 'Compliance savings', assumption: 'complianceReduction', chip: 'lower exposure' },
+  { key: 'maintenanceSavings', label: 'Maintenance savings', assumption: 'maintenanceReduction', chip: 'efficiency gain' }
+]
+
+function BrandLogo() {
   return (
-    <div style={{
-      background: '#111111', border: '1px solid #222', borderRadius: 16,
-      padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 12,
-      animation: `fadeIn 0.5s ease ${delay}ms forwards`, opacity: 0,
-      position: 'relative', overflow: 'hidden', minWidth: 0
-    }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #00e87a, transparent)' }} />
-      <span style={{ fontSize: 28 }}>{icon}</span>
-      <span style={{
-        fontFamily: 'Space Mono, monospace', fontSize: 'clamp(16px, 2.5vw, 28px)',
-        fontWeight: 700, color: '#00e87a', letterSpacing: '-0.5px',
-        wordBreak: 'break-all', display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'wrap'
-      }}>
-        {isCurrency && <span style={{ fontSize: 'clamp(14px, 2vw, 22px)', color: '#00e87a', opacity: 0.8 }}>{unit}</span>}
-        {animated.toLocaleString()}
-        {!isCurrency && <span style={{ fontSize: 12, color: '#00e87a', opacity: 0.6, marginLeft: 2 }}>{unit}</span>}
-      </span>
-      <span style={{ fontSize: 11, color: '#00e87a', opacity: 0.55, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
+    <div className="brand-mark" aria-label="Kale Logistics Solutions">
+      <img src="/kale-logo.png" alt="Kale Logistics Solutions" />
     </div>
   )
 }
 
-const BarTooltip = ({ active, payload, label, currency }) => {
-  if (active && payload && payload.length) {
-    return (
-      <div style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, padding: '10px 14px', fontFamily: 'Space Mono, monospace', fontSize: 12 }}>
-        <p style={{ color: '#aaa', marginBottom: 4 }}>{label}</p>
-        <p style={{ color: '#00e87a' }}>{currency}{payload[0].value.toLocaleString()}</p>
-      </div>
-    )
-  }
+function getCurrencyPrefix(currency) {
+  if (!currency) return '$'
+  return currency.length > 1 ? `${currency} ` : currency
+}
+
+function formatCurrency(value, currency) {
+  return `${getCurrencyPrefix(currency)}${Math.round(value || 0).toLocaleString()}`
+}
+
+function formatNumber(value) {
+  return Math.round(value || 0).toLocaleString()
+}
+
+function sanitizeCurrencyForPdf(currency) {
+  if (currency === '₹') return 'Rs. '
+  if (currency === 'د.إ') return 'AED '
+  if (currency && currency.length === 1 && currency.charCodeAt(0) > 127) return ''
+  return getCurrencyPrefix(currency)
+}
+
+function calculateForEntity(entity, inputValues, assumptions) {
+  if (entity === 'trucker') return calculateSimple(inputValues, assumptions)
+  if (entity === 'forwarder') return calculateForwarder(inputValues, assumptions)
+  if (entity === 'airport') return calculateAirport(inputValues, assumptions)
+  if (entity === 'gha') return calculateGHA(inputValues, assumptions)
   return null
 }
 
-const BarLabel = ({ x, y, width, value, currency }) => {
-  if (!value) return null
-  const display = value >= 1000000
-    ? `${currency}${(value / 1000000).toFixed(1)}M`
-    : value >= 1000
-    ? `${currency}${(value / 1000).toFixed(0)}K`
-    : `${currency}${value}`
-  return <text x={x + width / 2} y={y - 6} fill='#aaaaaa' textAnchor='middle' fontSize={10} fontFamily='Space Mono, monospace'>{display}</text>
+function clampPercentage(value) {
+  const number = Number(value)
+  if (Number.isNaN(number)) return 0
+  return Math.min(100, Math.max(0, Math.round(number)))
 }
 
-const PieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-  if (percent < 0.04) return null
-  const RADIAN = Math.PI / 180
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5
-  const x = cx + radius * Math.cos(-midAngle * RADIAN)
-  const y = cy + radius * Math.sin(-midAngle * RADIAN)
-  return <text x={x} y={y} fill='#000' textAnchor='middle' dominantBaseline='central' fontSize={11} fontWeight={700} fontFamily='Space Mono, monospace'>{`${(percent * 100).toFixed(0)}%`}</text>
-}
-
-const CHART_COLORS = ['#00e87a', '#4d9fff', '#f5a623', '#c084fc', '#f87171']
-
-export default function Home() {
-  const [countries, setCountries] = useState([])
-  const [selectedCountry, setSelectedCountry] = useState('')
-  const [countryData, setCountryData] = useState(null)
-  const [tonnage, setTonnage] = useState(0)
-  const [tonnageDisplay, setTonnageDisplay] = useState('')
-  const [results, setResults] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [years, setYears] = useState(1)
-  const [growthRate, setGrowthRate] = useState(5)
-  const resultsRef = useRef(null)
-  const metric = useMetric(selectedCountry)
-  const multiplier = compoundMultiplier(years, growthRate)
-  const tonnageValid = tonnage > 0
+function useCountUp(target, duration = 900) {
+  const [value, setValue] = useState(0)
 
   useEffect(() => {
-    async function fetchCountries() {
-      const { data } = await supabase.from('country_data').select('country').order('country')
-      setCountries(data || [])
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (prefersReducedMotion || !target) {
+      const frame = requestAnimationFrame(() => setValue(target || 0))
+      return () => cancelAnimationFrame(frame)
     }
-    fetchCountries()
+
+    let start = 0
+    const steps = 42
+    const increment = target / steps
+    const interval = duration / steps
+    const timer = setInterval(() => {
+      start += increment
+      if (start >= target) {
+        setValue(target)
+        clearInterval(timer)
+      } else {
+        setValue(Math.floor(start))
+      }
+    }, interval)
+
+    return () => clearInterval(timer)
+  }, [duration, target])
+
+  return value
+}
+
+function useScrollReveal(enabled, key) {
+  useEffect(() => {
+    if (!enabled) return
+
+    const nodes = Array.from(document.querySelectorAll('.motion-reveal'))
+    if (!nodes.length) return
+
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (prefersReducedMotion || typeof IntersectionObserver === 'undefined') {
+      nodes.forEach((node) => node.classList.add('is-visible'))
+      return
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        entry.target.classList.add('is-visible')
+        observer.unobserve(entry.target)
+      })
+    }, {
+      rootMargin: '0px 0px -12% 0px',
+      threshold: 0.18
+    })
+
+    nodes.forEach((node, index) => {
+      node.style.setProperty('--reveal-order', index % 6)
+      observer.observe(node)
+    })
+
+    return () => observer.disconnect()
+  }, [enabled, key])
+}
+
+async function generatePDF({ results, activeEntity, selectedCountry, currency }) {
+  const jsPDFModule = await import('jspdf/dist/jspdf.es.min.js')
+  const jsPDF = jsPDFModule.jsPDF || jsPDFModule.default
+  const doc = new jsPDF()
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const c = sanitizeCurrencyForPdf(currency)
+  let y = 58
+
+  const write = (text, x, yy, opts = {}) => doc.text(String(text), x, yy, opts)
+  const divider = (yy) => {
+    doc.setDrawColor(169, 139, 79)
+    doc.line(14, yy, pageWidth - 14, yy)
+  }
+  const section = (label, yy) => {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(47, 93, 78)
+    write(label, 14, yy)
+    divider(yy + 4)
+    return yy + 14
+  }
+  const row = (label, value, yy, muted = false) => {
+    doc.setFillColor(247, 243, 235)
+    doc.setDrawColor(224, 215, 199)
+    doc.roundedRect(14, yy - 7, pageWidth - 28, 14, 1.5, 1.5, 'FD')
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.setTextColor(80, 68, 58)
+    write(label, 18, yy + 2)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(...(muted ? [80, 68, 58] : [47, 93, 78]))
+    write(value, pageWidth - 18, yy + 2, { align: 'right' })
+    return yy + 16
+  }
+
+  doc.setFillColor(236, 230, 218)
+  doc.rect(0, 0, pageWidth, pageHeight, 'F')
+  doc.setFillColor(27, 23, 20)
+  doc.rect(0, 0, pageWidth, 44, 'F')
+  doc.setTextColor(236, 230, 218)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(17)
+  write('Airport Cargo Savings Report', 14, 18)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  write('ACS Airport Community Systems', 14, 28)
+  doc.setTextColor(169, 139, 79)
+  write(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), 14, 36)
+  doc.setTextColor(236, 230, 218)
+  doc.setFont('helvetica', 'bold')
+  write(selectedCountry, pageWidth - 14, 18, { align: 'right' })
+  doc.setFont('helvetica', 'normal')
+  write(`Entity: ${activeEntity.toUpperCase()}`, pageWidth - 14, 32, { align: 'right' })
+
+  y = section('Current monthly baseline', y)
+  y = row('Total monthly trips', formatNumber(results.totalMonthlyTrips), y, true)
+  y = row('Total monthly miles driven', formatNumber(results.totalMonthlyMiles), y, true)
+  y = row('Monthly fuel cost', `${c}${formatNumber(results.monthlyFuelCost)}`, y, true)
+  y = row('Monthly labor - trips', `${c}${formatNumber(results.driverLabourTrips)}`, y, true)
+  y = row('Idle / gate-queue cost', `${c}${formatNumber(results.idleGateCost)}`, y, true)
+  y = row('Paperwork labor cost', `${c}${formatNumber(results.paperworkLabour)}`, y, true)
+  y = row('Regulatory penalty exposure', `${c}${formatNumber(results.regulatoryPenalty)}`, y, true)
+
+  y += 8
+  doc.setFillColor(47, 93, 78)
+  doc.roundedRect(14, y, pageWidth - 28, 30, 2, 2, 'F')
+  doc.setTextColor(236, 230, 218)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  write('Estimated savings with digital ACS', pageWidth / 2, y + 10, { align: 'center' })
+  doc.setFontSize(22)
+  write(`${c}${formatNumber(results.totalMonthlySavings)} / month`, pageWidth / 2, y + 22, { align: 'center' })
+  y += 42
+
+  y = section('Savings breakdown', y)
+  y = row('Fuel savings', `${c}${formatNumber(results.fuelSavings)}`, y)
+  y = row('Time and labor savings', `${c}${formatNumber(results.driverTimeSavings)}`, y)
+  y = row('Compliance savings', `${c}${formatNumber(results.complianceSavings)}`, y)
+  y = row('Maintenance savings', `${c}${formatNumber(results.maintenanceSavings)}`, y)
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(80, 68, 58)
+  write(`Annual savings projected: ${c}${formatNumber(results.totalAnnualSavings)}`, 14, pageHeight - 26)
+  write(`Annual CO2 reduction: ${results.co2TonsYear.toLocaleString()} metric tons`, 14, pageHeight - 18)
+  write('For informational purposes based on industry benchmarks. Actual savings may vary.', 14, pageHeight - 10)
+
+  doc.save(`ACS_Savings_Report_${selectedCountry.replace(/ /g, '_')}_${new Date().getFullYear()}.pdf`)
+}
+
+function InputField({ field, label, hint, value, onChange, currency, kind = '', step = 1 }) {
+  const id = `input-${field}`
+  const prefix = kind === 'currency' ? getCurrencyPrefix(currency) : ''
+
+  return (
+    <div className="field">
+      <label className="field__label" htmlFor={id}>{label}</label>
+      <p className="field__hint">{hint}</p>
+      <div className="field__control">
+        {prefix && <span className="field__prefix">{prefix}</span>}
+        <input
+          id={id}
+          type="number"
+          min="0"
+          step={step}
+          value={value == null || value === '' ? '' : value}
+          placeholder="0"
+          onKeyDown={(event) => {
+            if (['-', '+', 'e', 'E'].includes(event.key)) event.preventDefault()
+          }}
+          onChange={(event) => {
+            if (event.target.value === '') {
+              onChange('')
+              return
+            }
+            const number = Number(event.target.value)
+            onChange(number < 0 ? 0 : number)
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function EntityButton({ entity, active, onClick }) {
+  return (
+    <button
+      type="button"
+      className={`entity-button ${active ? 'entity-button--active' : ''}`}
+      onClick={onClick}
+      aria-pressed={active}
+    >
+      <span>{entity.kicker}</span>
+      {entity.label}
+    </button>
+  )
+}
+
+function MetricCard({ label, value, unit = '', currency, isCurrency = false, tone = 'neutral', chip = '', className = '' }) {
+  const animated = useCountUp(Number(value) || 0)
+  const display = isCurrency ? formatCurrency(animated, currency) : `${formatNumber(animated)}${unit ? ` ${unit}` : ''}`
+
+  return (
+    <article className={`metric-card metric-card--${tone} ${className}`}>
+      <div className="metric-card__top">
+        <span className="metric-card__label">{label}</span>
+        {chip && <span className="metric-card__chip">{chip}</span>}
+      </div>
+      <strong className="metric-card__value">{display}</strong>
+    </article>
+  )
+}
+
+function SavingsValue({ value, currency }) {
+  const animated = useCountUp(Number(value) || 0, 1100)
+
+  return <>{formatCurrency(animated, currency)}</>
+}
+
+function AssumptionControl({ control, value, benchmark, onChange }) {
+  const [key, label, description] = control
+  const controlId = `assumption-${key}`
+
+  return (
+    <label className="assumption-control" htmlFor={controlId}>
+      <span className="assumption-control__header">
+        <span>
+          <strong>{label}</strong>
+          <small>{description}</small>
+        </span>
+        <b>{value}%</b>
+      </span>
+      <input
+        id={controlId}
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value={value}
+        onInput={(event) => onChange(key, event.currentTarget.value)}
+        onChange={(event) => onChange(key, event.target.value)}
+      />
+      <span className="assumption-control__footer">
+        <span>0%</span>
+        <span>Benchmark {benchmark}%</span>
+        <span>100%</span>
+      </span>
+    </label>
+  )
+}
+
+export default function Home() {
+  const [countries, setCountries] = useState(FALLBACK_COUNTRIES)
+  const [selectedCountry, setSelectedCountry] = useState('')
+  const [countryData, setCountryData] = useState(null)
+  const [activeEntity, setActiveEntity] = useState('trucker')
+  const [results, setResults] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [showCalculator, setShowCalculator] = useState(true)
+  const [showAssumptions, setShowAssumptions] = useState(false)
+  const [changedAssumption, setChangedAssumption] = useState('')
+  const [assumptions, setAssumptions] = useState(BENCHMARK_ASSUMPTIONS)
+  const [contactDetails, setContactDetails] = useState({
+    name: '',
+    company: '',
+    email: ''
+  })
+  const [inputs, setInputs] = useState(INITIAL_INPUTS)
+  const resultsRef = useRef(null)
+  const assumptionPulseTimer = useRef(null)
+
+  const currency = countryData?.currency_symbol || '$'
+  const activeMeta = ENTITY_OPTIONS.find((entity) => entity.id === activeEntity)
+  const activeInputs = inputs[activeEntity] || {}
+  const activeFields = INPUTS[activeEntity]
+  const activeAssumptions = assumptions[activeEntity] || BENCHMARK_ASSUMPTIONS[activeEntity]
+  const activeAssumptionControls = ASSUMPTION_CONTROLS[activeEntity] || []
+  const hasResults = Boolean(results)
+
+  useEffect(() => {
+    supabase.from('country_data').select('country').order('country')
+      .then(({ data, error }) => {
+        if (error || !data?.length) return
+        setCountries(data)
+      })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (assumptionPulseTimer.current) clearTimeout(assumptionPulseTimer.current)
+    }
   }, [])
 
   useEffect(() => {
     if (!selectedCountry) return
-    async function fetchCountryData() {
-      const { data } = await supabase.from('country_data').select('*').eq('country', selectedCountry).single()
-      setCountryData(data)
+
+    const fallback = FALLBACK_COUNTRIES.find((country) => country.country === selectedCountry)
+    const applyMarket = (market) => {
+      if (!market) return
+      const wage = market.trucker_wage_per_hr
+      setCountryData(market)
+      setInputs((previous) => ({
+        ...previous,
+        trucker: {
+          ...previous.trucker,
+          hourlyWage: wage,
+          dieselPrice: market.diesel_price_per_gallon
+        },
+        forwarder: {
+          ...previous.forwarder,
+          hourlyWage: wage
+        },
+        gha: {
+          ...previous.gha,
+          hourlyWage: wage
+        }
+      }))
     }
-    fetchCountryData()
+
+    applyMarket(fallback)
+
+    supabase.from('country_data').select('*').eq('country', selectedCountry).single()
+      .then(({ data }) => {
+        if (data) applyMarket(data)
+      })
   }, [selectedCountry])
 
-  function handleTonnageInput(e) {
-    const raw = e.target.value.replace(/,/g, '')
-    if (raw === '') { setTonnageDisplay(''); setTonnage(0); return }
-    if (isNaN(raw)) return
-    const num = Number(raw)
-    setTonnage(num)
-    setTonnageDisplay(e.target.value.replace(/[^0-9,]/g, ''))
+  useEffect(() => {
+    if (!hasResults) return
+    const frame = requestAnimationFrame(() => {
+      setResults(calculateForEntity(activeEntity, activeInputs, activeAssumptions))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [activeAssumptions, activeEntity, activeInputs, hasResults])
+
+  useScrollReveal(Boolean(results), `${activeEntity}-${selectedCountry}-${results?.totalMonthlySavings || 0}`)
+
+  function updateInput(field, value) {
+    setInputs((previous) => ({
+      ...previous,
+      [activeEntity]: {
+        ...previous[activeEntity],
+        [field]: value
+      }
+    }))
   }
 
-  function handleSlider(e) {
-    const num = Number(e.target.value)
-    setTonnage(num)
-    setTonnageDisplay(num > 0 ? num.toLocaleString() : '')
+  function canCalculate() {
+    if (!selectedCountry) return false
+    return INPUTS[activeEntity].every(([field]) => Number(activeInputs[field]) > 0)
+  }
+
+  function handleEntityChange(entityId) {
+    setActiveEntity(entityId)
+    setResults(null)
+    setShowAssumptions(false)
+    setChangedAssumption('')
+  }
+
+  function markAssumptionChange(key) {
+    setChangedAssumption(key)
+    if (assumptionPulseTimer.current) clearTimeout(assumptionPulseTimer.current)
+    assumptionPulseTimer.current = setTimeout(() => setChangedAssumption(''), 760)
+  }
+
+  function updateAssumption(key, value) {
+    const nextValue = clampPercentage(value)
+
+    setAssumptions((previous) => ({
+      ...previous,
+      [activeEntity]: {
+        ...previous[activeEntity],
+        [key]: nextValue
+      }
+    }))
+    if (results) markAssumptionChange(key)
+  }
+
+  function resetActiveAssumptions() {
+    setAssumptions((previous) => ({
+      ...previous,
+      [activeEntity]: { ...BENCHMARK_ASSUMPTIONS[activeEntity] }
+    }))
+    if (results) markAssumptionChange('all')
   }
 
   function handleCalculate() {
-    if (!countryData || !tonnageValid) return
+    if (!canCalculate()) return
+
     setLoading(true)
     setResults(null)
-    setYears(1)
-    setGrowthRate(5)
+    setShowAssumptions(false)
     setTimeout(() => {
-      const output = calculate(Number(tonnage), countryData)
-      setResults(output)
+      const calculated = calculateForEntity(activeEntity, activeInputs, activeAssumptions)
+
+      setResults(calculated)
+      setShowCalculator(false)
       setLoading(false)
-      setTimeout(() => { resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 100)
-    }, 400)
+      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+    }, 680)
   }
 
-  const chartData = results ? [
-    { name: 'Driver',    value: Math.round(results.driverCostSavings * multiplier) },
-    { name: 'Forwarder', value: Math.round(results.forwarderSavings * multiplier) },
-    { name: 'Handler',   value: Math.round(results.handlerSavings * multiplier) },
-    { name: 'Carrier',   value: Math.round(results.carrierSavings * multiplier) },
-    { name: 'Fuel',      value: Math.round(results.fuelCostSaved * multiplier) },
-  ] : []
-
-  const currency = countryData?.currency_symbol || '$'
+  async function handleDownload() {
+    if (!results) return
+    setDownloading(true)
+    await generatePDF({ results, activeEntity, selectedCountry, currency })
+    setDownloading(false)
+  }
 
   return (
-    <main style={{ minHeight: '100vh', background: '#080808' }}>
+    <main className="app-shell">
+      {!results && (
+        <section className={`landing-stage ${showCalculator ? 'landing-stage--dimmed' : ''}`}>
+          <header className="site-nav" aria-label="Site navigation">
+            <BrandLogo />
+            <nav>
+              <a href="#solutions">Solutions</a>
+              <a href="#about">About us</a>
+              <a href="#careers">Careers</a>
+              <a href="#contact">Contact</a>
+            </nav>
+          </header>
 
-      {/* Hero */}
-      <section style={{ maxWidth: 900, margin: '0 auto', padding: '80px 24px 60px', textAlign: 'center' }}>
-        <div style={{ display: 'inline-block', background: 'rgba(0,232,122,0.08)', border: '1px solid rgba(0,232,122,0.25)', borderRadius: 999, padding: '6px 16px', fontSize: 12, color: '#00e87a', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 28 }}>
-          Sustainability Impact Calculator
-        </div>
-        <h1 style={{ fontSize: 'clamp(36px, 6vw, 72px)', fontWeight: 800, lineHeight: 1.05, letterSpacing: '-2px', marginBottom: 20, color: '#ffffff' }}>
-          Measure Your<br /><span style={{ color: '#00e87a' }}>Environmental Impact</span>
-        </h1>
-        <p style={{ fontSize: 17, color: '#666', maxWidth: 520, margin: '0 auto', lineHeight: 1.7 }}>
-          Enter your airport's annual cargo tonnage and see the real-world sustainability savings your logistics operations generate.
-        </p>
-      </section>
-
-      {/* Input Card */}
-      <section style={{ maxWidth: 700, margin: '0 auto 60px', padding: '0 24px' }}>
-        <div style={{ background: '#111111', border: '1px solid #222', borderRadius: 20, padding: '36px 32px', display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-          {/* Country */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7 }}>Country</label>
-            <select
-              value={selectedCountry}
-              onChange={e => setSelectedCountry(e.target.value)}
-              style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 10, color: selectedCountry ? '#ffffff' : '#666', fontFamily: 'Syne, sans-serif', fontSize: 15, padding: '14px 16px', outline: 'none', cursor: 'pointer', appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300e87a' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 16px center', backgroundSize: '12px' }}
-            >
-              <option value='' style={{ background: '#1a1a1a', color: '#666' }}>Select a country...</option>
-              {countries.map(c => <option key={c.country} value={c.country} style={{ background: '#1a1a1a', color: '#fff' }}>{c.country}</option>)}
-            </select>
+          <div className="landing-copy">
+            <p className="eyebrow">ACS savings calculator</p>
+            <h1>Estimate the operational drag hiding inside airport trucking.</h1>
+            <p className="hero__lede">
+              A fast, directional calculator for cargo teams that need to quantify delay,
+              fuel burn, paperwork labor, and compliance exposure before the business case.
+            </p>
+            <button type="button" className="open-calculator" onClick={() => setShowCalculator(true)}>
+              Open calculator
+            </button>
           </div>
 
-          {/* Tonnage — locked until country selected */}
-          <div style={{
-            display: 'flex', flexDirection: 'column', gap: 12,
-            opacity: selectedCountry ? 1 : 0.4,
-            transition: 'opacity 0.3s ease',
-            pointerEvents: selectedCountry ? 'auto' : 'none'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <label style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.7, display: 'block' }}>
-                  Annual Tonnage
-                </label>
-                <p style={{ fontSize: 11, color: '#444', fontFamily: 'Space Mono, monospace', margin: '4px 0 0' }}>
-                  Drag to select tonnage or type below
-                </p>
-              </div>
-              {tonnageValid && (
-                <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 13, color: '#f5a623', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                  {Number(tonnage).toLocaleString()} tons
-                </span>
-              )}
-            </div>
-            <input
-              type='range' min={0} max={5000000} step={50000}
-              value={tonnage}
-              onChange={handleSlider}
-              disabled={!selectedCountry}
-              style={{ accentColor: '#f5a623', cursor: selectedCountry ? 'pointer' : 'not-allowed', width: '100%' }}
-            />
-            <input
-              type='text'
-              value={tonnageDisplay}
-              onChange={handleTonnageInput}
-              disabled={!selectedCountry}
-              placeholder='Type your annual tonnage here...'
-              style={{ background: '#1a1a1a', border: `1px solid ${tonnageValid ? '#f5a623' : '#333'}`, borderRadius: 10, color: '#ffffff', fontFamily: 'Space Mono, monospace', fontSize: 15, padding: '12px 16px', outline: 'none', cursor: selectedCountry ? 'text' : 'not-allowed', transition: 'border-color 0.2s ease' }}
-            />
-            {selectedCountry && !tonnageValid && (
-              <p style={{ fontSize: 11, color: '#555', fontFamily: 'Space Mono, monospace', margin: 0 }}>
-                Enter a value greater than 0 to calculate impact
-              </p>
-            )}
-          </div>
-
-          {/* Calculate Button */}
-          <button
-            onClick={handleCalculate}
-            disabled={!selectedCountry || !tonnageValid || loading}
-            style={{ background: selectedCountry && tonnageValid ? '#00e87a' : '#1a1a1a', color: selectedCountry && tonnageValid ? '#000000' : '#555', border: 'none', borderRadius: 10, padding: '16px', fontSize: 15, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: selectedCountry && tonnageValid ? 'pointer' : 'not-allowed', transition: 'all 0.2s ease', letterSpacing: '0.02em' }}>
-            {loading ? 'Calculating...' : 'Calculate Impact →'}
-          </button>
-
-        </div>
-      </section>
-
-      {/* Results */}
-      {results && (
-        <section ref={resultsRef} style={{ maxWidth: 900, margin: '0 auto', padding: '0 24px 80px' }}>
-
-          {/* Divider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
-            <div style={{ height: 1, flex: 1, background: '#222' }} />
-            <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.6 }}>
-              {years === 1 ? 'Annual Impact' : `${years}-Year Cumulative Impact${growthRate > 0 ? ` @ ${growthRate}% growth` : ' (flat)'}`} — {selectedCountry}
-            </span>
-            <div style={{ height: 1, flex: 1, background: '#222' }} />
-          </div>
-
-          {/* Projection Control Panel */}
-          <div style={{
-            background: '#0d1a14', border: '1px solid #1a2e20', borderRadius: 16,
-            padding: '24px 28px', marginBottom: 36,
-            display: 'flex', flexDirection: 'column', gap: 20,
-            animation: 'fadeIn 0.5s ease forwards', opacity: 0
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 16 }}>📈</span>
-                <p style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', fontFamily: 'Syne, sans-serif', margin: 0 }}>Model growth scenarios</p>
-              </div>
-              <p style={{ fontSize: 11, color: '#444', fontFamily: 'Space Mono, monospace', margin: 0 }}>
-                Adjust projection window and tonnage growth rate
+          <div className="landing-footer">
+            <div>
+              <p className="panel-kicker">About ACS</p>
+              <p>
+                Kale Logistics Solutions connects airport cargo stakeholders with digital workflows
+                that reduce idle time, queue friction, and manual documentation.
               </p>
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 24, alignItems: 'start' }}>
-
-              {/* Year Toggle */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>Projection</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {[1, 5, 10].map(y => (
-                    <button key={y} onClick={() => setYears(y)} style={{ background: years === y ? '#4d9fff' : '#111111', color: years === y ? '#000000' : '#666', border: years === y ? 'none' : '1px solid #222', borderRadius: 8, padding: '8px 20px', fontSize: 12, fontWeight: 700, fontFamily: 'Syne, sans-serif', cursor: 'pointer', transition: 'all 0.2s ease', whiteSpace: 'nowrap' }}>
-                      {y === 1 ? '1 Year' : `${y} Years`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Growth Slider */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#4d9fff', opacity: 0.7 }}>Annual Tonnage Growth</label>
-                  <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, color: '#4d9fff', fontWeight: 700 }}>{growthRate}%</span>
-                </div>
-                <input
-                  type='range' min={0} max={100} step={1}
-                  value={growthRate}
-                  onChange={e => setGrowthRate(Number(e.target.value))}
-                  disabled={years === 1}
-                  style={{ accentColor: '#4d9fff', cursor: years === 1 ? 'not-allowed' : 'pointer', width: '100%', opacity: years === 1 ? 0.4 : 1, transition: 'opacity 0.3s ease' }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 10, color: '#333' }}>0% flat</span>
-                  <span style={{ fontSize: 10, color: '#333' }}>100%</span>
-                </div>
-                <div style={{ background: 'rgba(77,159,255,0.05)', border: '1px solid rgba(77,159,255,0.1)', borderRadius: 8, padding: '10px 14px' }}>
-                  <p style={{ fontSize: 11, color: '#4d9fff', fontFamily: 'Space Mono, monospace', margin: '0 0 4px', opacity: years === 1 ? 0.4 : 0.85 }}>
-                    {years === 1 ? 'Select 5Y or 10Y to model growth' : growthLabel(growthRate)}
-                  </p>
-                  {years > 1 && (
-                    <p style={{ fontSize: 10, color: '#444', fontFamily: 'Space Mono, monospace', margin: 0 }}>
-                      Year 1: {Number(tonnage).toLocaleString()} → Year {years}: {Math.round(tonnage * Math.pow(1 + growthRate / 100, years - 1)).toLocaleString()} tons
-                      {growthRate > 0 && ` · ×${compoundMultiplier(years, growthRate).toFixed(2)} cumulative`}
-                    </p>
-                  )}
-                </div>
-              </div>
+            <div>
+              <p className="panel-kicker">Latest story</p>
+              <p>Community systems are becoming the operating layer for faster cargo movement.</p>
+            </div>
+            <div>
+              <p className="panel-kicker">Region</p>
+              <p>North America</p>
             </div>
           </div>
-
-          {/* Environmental Cards */}
-          <p style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.6, marginBottom: 16 }}>Environmental</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 40 }}>
-            <StatCard icon='🌿' label='CO₂ Saved' value={co2Value(Math.round(results.co2SavedKgs * multiplier), metric)} unit={co2Unit(metric)} delay={0} />
-            <StatCard icon='🌳' label='Trees Saved' value={Math.round(results.treesSaved * multiplier)} unit='trees' delay={100} />
-            <StatCard icon='⛽' label='Fuel Saved' value={fuelValue(Math.round(results.fuelSavedGallons * multiplier), metric)} unit={fuelUnit(metric)} delay={200} />
-          </div>
-
-          {/* Economic Cards */}
-          <p style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#00e87a', opacity: 0.6, marginBottom: 16 }}>Economic</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 40 }}>
-            <StatCard icon='💰' label='Total Community Savings' value={Math.round(results.totalCommunitySavings * multiplier)} unit={currency} isCurrency delay={0} />
-            <StatCard icon='🚚' label='Driver Cost Savings' value={Math.round(results.driverCostSavings * multiplier)} unit={currency} isCurrency delay={100} />
-            <StatCard icon='📦' label='Handler Savings' value={Math.round(results.handlerSavings * multiplier)} unit={currency} isCurrency delay={200} />
-          </div>
-
-          {/* Bar Chart */}
-          <div style={{ background: '#111111', border: '1px solid #222', borderRadius: 16, padding: '28px 24px', animation: 'fadeIn 0.5s ease 300ms forwards', opacity: 0 }}>
-            <p style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#888', marginBottom: 24 }}>Savings Breakdown by Stakeholder</p>
-            <ResponsiveContainer width='100%' height={280}>
-              <BarChart data={chartData} barSize={36} margin={{ top: 24, right: 10, left: 10, bottom: 0 }}>
-                <XAxis dataKey='name' tick={{ fill: '#aaaaaa', fontSize: 12, fontFamily: 'Space Mono' }} axisLine={false} tickLine={false} />
-                <YAxis hide />
-                <Tooltip content={<BarTooltip currency={currency} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-                <Bar dataKey='value' radius={[6, 6, 0, 0]}>
-                  {chartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i]} />)}
-                  <LabelList content={<BarLabel currency={currency} />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Donut Chart */}
-          <div style={{ background: '#111111', border: '1px solid #222', borderRadius: 16, padding: '28px 24px', marginTop: 20, animation: 'fadeIn 0.5s ease 350ms forwards', opacity: 0 }}>
-            <p style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#888', marginBottom: 6 }}>Savings Distribution by Stakeholder</p>
-            <p style={{ fontSize: 12, color: '#555', fontFamily: 'Space Mono, monospace', marginBottom: 24 }}>Who benefits most from ACS adoption</p>
-            <ResponsiveContainer width='100%' height={320}>
-              <PieChart>
-                <Pie data={chartData} cx='50%' cy='50%' innerRadius={70} outerRadius={120} paddingAngle={3} dataKey='value' labelLine={false} label={PieLabel}>
-                  {chartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i]} />)}
-                </Pie>
-                <Tooltip content={({ active, payload }) => {
-                  if (active && payload && payload.length) {
-                    const total = chartData.reduce((a, b) => a + b.value, 0)
-                    const pct = ((payload[0].value / total) * 100).toFixed(1)
-                    return (
-                      <div style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, padding: '10px 14px', fontFamily: 'Space Mono, monospace', fontSize: 12 }}>
-                        <p style={{ color: '#aaa', marginBottom: 4 }}>{payload[0].name}</p>
-                        <p style={{ color: '#00e87a' }}>{currency}{payload[0].value.toLocaleString()}</p>
-                        <p style={{ color: '#00e87a', marginTop: 2, fontWeight: 700 }}>{pct}% of total</p>
-                      </div>
-                    )
-                  }
-                  return null
-                }} />
-                <Legend formatter={(value) => <span style={{ color: '#cccccc', fontSize: 12, fontFamily: 'Space Mono, monospace' }}>{value}</span>} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* AWB Summary */}
-          <div style={{ marginTop: 20, background: 'rgba(0,232,122,0.06)', border: '1px solid rgba(0,232,122,0.2)', borderRadius: 16, padding: '32px 40px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 24, animation: 'fadeIn 0.5s ease 400ms forwards', opacity: 0 }}>
-            {[
-              { label: 'Est. AWBs',        value: results.numAWBs.toLocaleString(),                                   prefix: '' },
-              { label: 'Est. Trucks',       value: results.numTrucks.toLocaleString(),                                 prefix: '' },
-              { label: 'Forwarder Savings', value: Math.round(results.forwarderSavings * multiplier).toLocaleString(), prefix: currency },
-              { label: 'Carrier Savings',   value: Math.round(results.carrierSavings * multiplier).toLocaleString(),   prefix: currency },
-            ].map(item => (
-              <div key={item.label} style={{ textAlign: 'center' }}>
-                <span style={{ display: 'block', fontSize: 11, color: '#00e87a', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>{item.label}</span>
-                <p style={{ fontFamily: 'Space Mono', fontSize: 20, color: '#00e87a', fontWeight: 700, letterSpacing: '-0.5px', margin: 0 }}>{item.prefix}{item.value}</p>
-              </div>
-            ))}
-          </div>
-
         </section>
       )}
 
-      {/* Footer */}
-      <footer style={{ textAlign: 'center', padding: '32px 24px', borderTop: '1px solid #161616' }}>
-        <p style={{ fontSize: 12, color: '#333', fontFamily: 'Space Mono, monospace', letterSpacing: '0.05em' }}>
-          Built by Aditya and Atharva
-        </p>
-      </footer>
+      {showCalculator && (
+        <section
+          className={`modal-layer ${loading ? 'modal-layer--calculating' : ''}`}
+          role="presentation"
+        >
+          <div
+            className={`calculator-modal ${loading ? 'calculator-modal--calculating' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calculator-title"
+          >
+              <div className="modal-heading">
+                <div>
+                  <p className="panel-kicker">Airport trucking</p>
+                  <h2 id="calculator-title">Savings calculator</h2>
+                  <p>{activeMeta.description}</p>
+                </div>
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setShowCalculator(false)}
+                  aria-label="Close calculator"
+                >
+                  ×
+                </button>
+              </div>
 
+              <div className="modal-grid modal-grid--top">
+                <div className="market-row">
+                  <label htmlFor="country-select">Market</label>
+                  <select
+                    id="country-select"
+                    value={selectedCountry}
+                    onChange={(event) => {
+                      const nextCountry = event.target.value
+                      setSelectedCountry(nextCountry)
+                      setCountryData(null)
+                      setResults(null)
+                    }}
+                  >
+                    <option value="">Select a country</option>
+                    {countries.map((country) => (
+                      <option key={country.country} value={country.country}>{country.country}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="modal-help-card">
+                  <span>Output</span>
+                  <strong>Monthly and annual savings model</strong>
+                </div>
+              </div>
+
+              <div className="entity-grid entity-grid--modal" role="group" aria-label="Business entity">
+                {ENTITY_OPTIONS.map((entity) => (
+                  <EntityButton
+                    key={entity.id}
+                    entity={entity}
+                    active={activeEntity === entity.id}
+                    onClick={() => handleEntityChange(entity.id)}
+                  />
+                ))}
+              </div>
+
+              <div className="field-grid field-grid--modal">
+                {activeFields.map(([field, label, hint, kind, step]) => (
+                  <InputField
+                    key={field}
+                    field={field}
+                    label={label}
+                    hint={hint}
+                    value={activeInputs[field]}
+                    onChange={(value) => updateInput(field, value)}
+                    currency={currency}
+                    kind={kind}
+                    step={step || 1}
+                  />
+                ))}
+              </div>
+
+              <div className="contact-strip">
+                <p className="panel-kicker">Optional report details</p>
+                <div className="contact-grid">
+                  <label>
+                    <span>Your name</span>
+                    <input
+                      type="text"
+                      value={contactDetails.name}
+                      onChange={(event) => setContactDetails((previous) => ({ ...previous, name: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Company name</span>
+                    <input
+                      type="text"
+                      value={contactDetails.company}
+                      onChange={(event) => setContactDetails((previous) => ({ ...previous, company: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={contactDetails.email}
+                      onChange={(event) => setContactDetails((previous) => ({ ...previous, email: event.target.value }))}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <p>{selectedCountry ? `${activeMeta.label} estimate for ${selectedCountry}` : 'Select a market to activate the estimate.'}</p>
+                <button
+                  type="button"
+                  className={`primary-action ${loading ? 'primary-action--calculating' : ''}`}
+                  onClick={handleCalculate}
+                  disabled={!canCalculate() || loading}
+                >
+                  {loading ? 'Calculating' : 'Calculate savings'}
+                  {loading && (
+                    <span className="calculate-progress" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                  )}
+                </button>
+              </div>
+          </div>
+        </section>
+      )}
+
+      {results && (
+        <div
+          ref={resultsRef}
+          className="results-page"
+        >
+            <header className="result-nav">
+              <BrandLogo />
+              <div className="result-actions">
+                <button
+                  type="button"
+                  className="secondary-action secondary-action--light"
+                  onClick={() => {
+                    setShowAssumptions(false)
+                    setShowCalculator(true)
+                  }}
+                >
+                  New estimate
+                </button>
+                <button
+                  type="button"
+                  className="secondary-action secondary-action--light"
+                  onClick={() => setShowAssumptions(true)}
+                >
+                  Adjust assumptions
+                </button>
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                >
+                  {downloading ? 'Preparing report' : 'Download report'}
+                </button>
+              </div>
+            </header>
+
+            <section className="results">
+              <div className="results-hero motion-reveal motion-reveal--hero">
+                <div className="results-hero__summary">
+                  <div className={`hero-savings-card hero-savings-card--primary ${changedAssumption ? 'is-updating' : ''}`}>
+                    <span>Monthly savings</span>
+                    <strong>
+                      <SavingsValue value={results.totalMonthlySavings} currency={currency} />
+                    </strong>
+                    <p>with digital ACS workflow</p>
+                  </div>
+                  <div className={`hero-savings-card ${changedAssumption ? 'is-updating' : ''}`}>
+                    <span>Annual savings</span>
+                    <strong>
+                      <SavingsValue value={results.totalAnnualSavings} currency={currency} />
+                    </strong>
+                    <p>projected over 12 months</p>
+                  </div>
+                </div>
+                <div className="results-hero__meta">
+                  <span>{activeMeta.label} - {selectedCountry}</span>
+                  <span>Benchmark assumptions active</span>
+                </div>
+              </div>
+
+              <div className="results-section results-section--savings">
+                <div className="section-heading motion-reveal">
+                  <div>
+                    <p className="panel-kicker">Savings breakdown</p>
+                    <h3>Where the savings come from.</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-action secondary-action--light"
+                    onClick={() => setShowAssumptions(true)}
+                  >
+                    Adjust assumptions
+                  </button>
+                </div>
+
+                <div className="metric-grid">
+                {SAVINGS_ROWS.map((row) => {
+                  const percent = activeAssumptions[row.assumption] || 0
+
+                  return (
+                    <MetricCard
+                      key={row.key}
+                      label={row.label}
+                      value={results[row.key]}
+                      currency={currency}
+                      isCurrency
+                      tone={row.key === 'fuelSavings' ? 'gold' : row.key === 'complianceSavings' ? 'plum' : 'neutral'}
+                      chip={percent > 0 ? `${percent}% ${row.chip}` : ''}
+                      className={`motion-reveal motion-reveal--card ${changedAssumption === row.assumption || changedAssumption === 'all' ? 'metric-card--updating' : ''}`}
+                    />
+                  )
+                })}
+                </div>
+              </div>
+
+              <div className="results-section results-section--baseline">
+                <div className="section-heading motion-reveal">
+                  <div>
+                    <p className="panel-kicker">Model inputs used</p>
+                    <h3>Current monthly baseline.</h3>
+                  </div>
+                  <span>{activeMeta.label} - {selectedCountry}</span>
+                </div>
+
+                <div className="metric-grid metric-grid--baseline">
+                  <MetricCard label="Monthly trips" value={results.totalMonthlyTrips} className="motion-reveal motion-reveal--card" />
+                  <MetricCard label="Monthly miles" value={results.totalMonthlyMiles} className="motion-reveal motion-reveal--card" />
+                  <MetricCard label="Fuel cost" value={results.monthlyFuelCost} currency={currency} isCurrency tone="gold" className="motion-reveal motion-reveal--card" />
+                  <MetricCard label="Labor - trips" value={results.driverLabourTrips} currency={currency} isCurrency className="motion-reveal motion-reveal--card" />
+                  <MetricCard label="Idle / gate queue" value={results.idleGateCost} currency={currency} isCurrency className="motion-reveal motion-reveal--card" />
+                  <MetricCard label="Paperwork labor" value={results.paperworkLabour} currency={currency} isCurrency className="motion-reveal motion-reveal--card" />
+                  <MetricCard label="Penalty exposure" value={results.regulatoryPenalty} currency={currency} isCurrency className="motion-reveal motion-reveal--card" />
+                </div>
+              </div>
+
+              <div className="method-note">
+                <p className="panel-kicker">Benchmark basis</p>
+                <p>
+                  Fuel, labor, compliance, and maintenance assumptions reference Kale CCS logic and public industry benchmarks.
+                  Use this as a directional estimate, not a guaranteed outcome.
+                </p>
+              </div>
+            </section>
+        </div>
+      )}
+
+      {results && showAssumptions && (
+        <section
+          className="assumption-layer"
+          role="presentation"
+          onClick={() => setShowAssumptions(false)}
+        >
+          <aside
+            className="assumption-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="assumption-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="assumption-drawer__header">
+              <div>
+                <p className="panel-kicker">Savings assumptions</p>
+                <h2 id="assumption-title">Tune the model.</h2>
+                <p>{activeMeta.label} assumptions update the result live.</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowAssumptions(false)}
+                aria-label="Close assumptions"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="assumption-summary">
+              <span>Total monthly savings</span>
+              <strong>{formatCurrency(results.totalMonthlySavings, currency)}</strong>
+            </div>
+
+            <div className="assumption-controls">
+              {activeAssumptionControls.map((control) => (
+                <AssumptionControl
+                  key={control[0]}
+                  control={control}
+                  value={activeAssumptions[control[0]] || 0}
+                  benchmark={BENCHMARK_ASSUMPTIONS[activeEntity][control[0]] || 0}
+                  onChange={updateAssumption}
+                />
+              ))}
+            </div>
+
+            <div className="assumption-drawer__actions">
+              <button type="button" className="secondary-action secondary-action--light" onClick={resetActiveAssumptions}>
+                Reset to benchmark
+              </button>
+              <button type="button" className="primary-action" onClick={() => setShowAssumptions(false)}>
+                Apply assumptions
+              </button>
+            </div>
+          </aside>
+        </section>
+      )}
+
+      <footer className="footer">
+        <span>Kale Logistics Solutions</span>
+        <span>ACS Airport Community Systems</span>
+      </footer>
     </main>
   )
 }
