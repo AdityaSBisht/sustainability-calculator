@@ -1,0 +1,11 @@
+id,country,diesel_price_per_gallon,trucker_wage_per_hr,handler_wage_per_hr,carrier_wage_per_hr,forwarder_wage_per_hr,currency_symbol
+1,United States,4,37,16,16,33,$
+2,United Kingdom,7.2,18,12,20,20,£
+3,India,1.2,3.5,2,4,4,₹
+4,UAE,2.5,8,5,10,10,AED
+5,Germany,7.5,22,14,25,25,€
+6,Singapore,5.8,15,10,18,18,SGD
+7,Australia,4.5,28,18,30,30,AUD
+8,Canada,4.2,25,16,27,27,CAD
+9,China,1.5,6,3.5,7,7,¥
+10,Brazil,3.2,5,3,6,6,R$
